@@ -160,11 +160,11 @@ class FeatureMap(object):
 
 if __name__ == '__main__':
 
-    a = FeatureMap(4, 1, 1)
-    w1 = FilterLayer(2, 1, 1, 1)
-    b = FeatureMap(3, 1, 1)
-    w2 = FilterLayer(2, 1, 1, 1)
-    c = FeatureMap(2, 1, 1)
+    a = FeatureMap(32, 1, 1)
+    w1 = FilterLayer(5, 1, 6, 1)
+    b = FeatureMap(28, 6, 1)
+    w2 = FilterLayer(5, 6, 12, 1)
+    c = FeatureMap(24, 12, 1)
 
     a.set_output_feature_map(b)
     a.set_output_filter(w1)
@@ -183,15 +183,12 @@ if __name__ == '__main__':
     w2.set_output_feature_map(c)
 
     in_val = []
-    for i in range(1 * 4 * 4):
+    for i in range(1 * 32 * 32):
         in_val.append(i)
 
-    in_val = np.array(in_val).reshape((1, 4, 4))
+    in_val = np.array(in_val).reshape((1, 32, 32))
 
-    out_val = []
-    for i in range(1 * 2 * 2):
-        out_val.append(i)
-    out_val = np.array(out_val).reshape(1, 2, 2)
+    out_val = np.ones((12, 24, 24), dtype=float)
 
     a.set_out_val(in_val)
     b.cal_out()
