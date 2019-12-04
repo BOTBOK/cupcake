@@ -3,6 +3,36 @@ import copy
 import numpy as np
 
 
+class Activition(object):
+    @staticmethod
+    def forward(in_val):
+        return max(0, in_val)
+
+    @staticmethod
+    def array_forward(input_val):
+        deep, row, col = input_val.shape
+        ret = np.zeros((deep, row, col), dtype=float)
+        for index_deep in range(deep):
+            for i in range(row):
+                for j in range(col):
+                    ret[index_deep][i][j] = Activition.forward(input_val[index_deep][i][j])
+        return ret
+
+    @staticmethod
+    def backward(in_val):
+        return 1 if in_val > 0 else 0
+
+    @staticmethod
+    def array_backward(input_val):
+        deep, row, col = input_val.shape
+        ret = np.zeros((deep, row, col), dtype=float)
+        for index_deep in range(deep):
+            for i in range(row):
+                for j in range(col):
+                    ret[index_deep][i][j] = Activition.backward(input_val[index_deep][i][j])
+        return ret
+
+
 class ConOp(object):
     @staticmethod
     def convolution(in1, in2, step, bias):
@@ -70,6 +100,10 @@ class FilterLayer(object):
     def set_output_feature_map(self, feature_map):
         self.__output_feature_map = feature_map
 
+    @property
+    def output_feature_map(self):
+        return self.__output_feature_map
+
     def cal_dw(self):
         cal1 = self.__input_feature_map.out_val
         cal2 = ConOp.add_row_col_by_step(self.__output_feature_map.err_term, self.__step)
@@ -108,6 +142,7 @@ class FeatureMap(object):
     def __init__(self, width, deep, step):
         self.__step = step
         self.__out_val = np.zeros((deep, width, width), dtype=float)
+        self.__net_val = np.zeros((deep, width, width), dtype=float)
         self.__err_term = np.zeros((deep, width, width), dtype=float)
         self.__input_filter = None
         self.__output_filter = None
@@ -128,8 +163,9 @@ class FeatureMap(object):
 
     def cal_out(self):
         for i in range(len(self.__input_filter.w_list)):
-            self.__out_val[i] = ConOp.convolution(self.__input_feature_map.out_val, self.__input_filter.w_list[i],
+            self.__net_val[i] = ConOp.convolution(self.__input_feature_map.out_val, self.__input_filter.w_list[i],
                                                   self.__step, self.__input_filter.bias[i])
+        self.__out_val = Activition.array_forward(self.__net_val)
 
     def cal_err_term(self):
         cal1 = ConOp.add_zero_circle(self.__output_feature_map.err_term, self.__output_filter.w_list[0].shape[1] - 1)
@@ -142,12 +178,17 @@ class FeatureMap(object):
                 cal2.append(self.__output_filter.w_list[i][index_deep])
             cal2 = ConOp.rot90(np.array(cal2), 2)
             self.__err_term[index_deep] = ConOp.convolution(cal1, cal2, 1, 0)
+        self.__err_term = self.__err_term * Activition.array_backward(self.__net_val)
 
     def set_err_term(self, err_term):
         self.__err_term = err_term
 
     def set_out_val(self, out_val):
         self.__out_val = out_val
+
+    @property
+    def net_val(self):
+        return self.__net_val
 
     @property
     def out_val(self):
@@ -158,13 +199,31 @@ class FeatureMap(object):
         return self.__err_term
 
 
+def judge_awl(in1, in2):
+    print("======================")
+    print(np.sum(in1 - in2))
+    print("======================")
+
+    deep, row, col = in1.shape
+    for index_deep in range(deep):
+        for i in range(row):
+            for j in range(col):
+                a = in1[index_deep][i][j]
+                b = in2[index_deep][i][j]
+                if a > 0 and b <= 0:
+                    return True
+                if a <= 0 and b >0:
+                    return True
+    return False
+
+
 if __name__ == '__main__':
 
-    a = FeatureMap(32, 1, 1)
-    w1 = FilterLayer(5, 1, 6, 1)
-    b = FeatureMap(28, 6, 1)
-    w2 = FilterLayer(5, 6, 12, 1)
-    c = FeatureMap(24, 12, 1)
+    a = FeatureMap(5, 1, 1)
+    w1 = FilterLayer(2, 1, 1, 1)
+    b = FeatureMap(4, 1, 1)
+    w2 = FilterLayer(2, 1, 1, 1)
+    c = FeatureMap(3, 1, 1)
 
     a.set_output_feature_map(b)
     a.set_output_filter(w1)
@@ -183,16 +242,18 @@ if __name__ == '__main__':
     w2.set_output_feature_map(c)
 
     in_val = []
-    for i in range(1 * 32 * 32):
+    for i in range(1 * 5 * 5):
         in_val.append(i)
 
-    in_val = np.array(in_val).reshape((1, 32, 32))
+    in_val = np.array(in_val).reshape((1, 5, 5))
 
-    out_val = np.ones((12, 24, 24), dtype=float)
+    out_val = np.ones((1, 3, 3), dtype=float)
 
     a.set_out_val(in_val)
     b.cal_out()
     c.cal_out()
+
+    out_val = out_val * Activition.array_backward(out_val)
 
     c.set_err_term(out_val)
     b.cal_err_term()
@@ -205,6 +266,7 @@ if __name__ == '__main__':
 
     w_list = w1.w_list
     dw = w1.dw
+    o11 = c.net_val
     for i in range(len(w_list)):
         deep, row, col = w_list[i].shape
         for index_deep in range(deep):
@@ -215,16 +277,25 @@ if __name__ == '__main__':
                     w1.set_w(w_list)
                     b.cal_out()
                     c.cal_out()
+                    o1 = c.net_val
                     err1 = err_term(c.out_val)
+                    if judge_awl(o11, o1):
+                        continue
 
                     w_list[i][index_deep][r][co] -= 2 * e
                     w1.set_w(w_list)
                     b.cal_out()
                     c.cal_out()
+                    o2 = c.net_val
                     err2 = err_term(c.out_val)
+                    if judge_awl(o11, o2):
+                        continue
 
                     w_list[i][index_deep][r][co] += e
                     w1.set_w(w_list)
+                    if judge_awl(o1, o2):
+                        continue
+
                     print((err1 - err2) / (2 * e))
                     print(dw[i][index_deep][r][co])
 
