@@ -144,6 +144,7 @@ class FeatureMap(object):
         self.__out_val = np.zeros((deep, width, width), dtype=float)
         self.__net_val = np.zeros((deep, width, width), dtype=float)
         self.__err_term = np.zeros((deep, width, width), dtype=float)
+        self.__err_out = np.zeros((deep, width, width), dtype=float)
         self.__input_filter = None
         self.__output_filter = None
         self.__input_feature_map = None
@@ -167,21 +168,23 @@ class FeatureMap(object):
                                                   self.__step, self.__input_filter.bias[i])
         self.__out_val = Activition.array_forward(self.__net_val)
 
-    def cal_err_term(self):
+    def cal_err_out(self):
         cal1 = ConOp.add_zero_circle(self.__output_feature_map.err_term, self.__output_filter.w_list[0].shape[1] - 1)
         cal1 = ConOp.add_row_col_by_step(cal1, self.__step)
-
         deep, row, col = self.__output_filter.w_list[0].shape
         for index_deep in range(deep):
             cal2 = []
             for i in range(len(self.__output_filter.w_list)):
                 cal2.append(self.__output_filter.w_list[i][index_deep])
             cal2 = ConOp.rot90(np.array(cal2), 2)
-            self.__err_term[index_deep] = ConOp.convolution(cal1, cal2, 1, 0)
-        self.__err_term = self.__err_term * Activition.array_backward(self.__net_val)
+            self.__err_out[index_deep] = ConOp.convolution(cal1, cal2, 1, 0)
+
+    def cal_err_term(self):
+        self.cal_err_out()
+        self.__err_term = self.__err_out * Activition.array_backward(self.__net_val)
 
     def set_err_term(self, err_term):
-        self.__err_term = err_term
+        self.__err_term = err_term * Activition.array_backward(self.__net_val)
 
     def set_out_val(self, out_val):
         self.__out_val = out_val
@@ -200,19 +203,15 @@ class FeatureMap(object):
 
 
 def judge_awl(in1, in2):
-    print("======================")
-    print(np.sum(in1 - in2))
-    print("======================")
-
     deep, row, col = in1.shape
     for index_deep in range(deep):
         for i in range(row):
             for j in range(col):
                 a = in1[index_deep][i][j]
                 b = in2[index_deep][i][j]
-                if a > 0 and b <= 0:
+                if a <= 0 < b:
                     return True
-                if a <= 0 and b >0:
+                if a > 0 >= b:
                     return True
     return False
 
@@ -266,7 +265,6 @@ if __name__ == '__main__':
 
     w_list = w1.w_list
     dw = w1.dw
-    o11 = c.net_val
     for i in range(len(w_list)):
         deep, row, col = w_list[i].shape
         for index_deep in range(deep):
@@ -277,24 +275,24 @@ if __name__ == '__main__':
                     w1.set_w(w_list)
                     b.cal_out()
                     c.cal_out()
-                    o1 = c.net_val
+                    oo1 = copy.copy(b.net_val)
+                    o1 = copy.copy(c.net_val)
                     err1 = err_term(c.out_val)
-                    if judge_awl(o11, o1):
-                        continue
 
                     w_list[i][index_deep][r][co] -= 2 * e
                     w1.set_w(w_list)
                     b.cal_out()
                     c.cal_out()
-                    o2 = c.net_val
+                    oo2 = copy.copy(b.net_val)
+                    o2 = copy.copy(c.net_val)
                     err2 = err_term(c.out_val)
-                    if judge_awl(o11, o2):
-                        continue
+                    if judge_awl(oo1, oo2):
+                        print("b分布在函数不同分段")
+                    if judge_awl(o1, o2):
+                        print("c分布在不同两段")
 
                     w_list[i][index_deep][r][co] += e
                     w1.set_w(w_list)
-                    if judge_awl(o1, o2):
-                        continue
 
                     print((err1 - err2) / (2 * e))
                     print(dw[i][index_deep][r][co])
