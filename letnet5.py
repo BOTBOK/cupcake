@@ -2,35 +2,7 @@ import copy
 
 import numpy as np
 
-
-class Activition(object):
-    @staticmethod
-    def forward(in_val):
-        return max(0, in_val)
-
-    @staticmethod
-    def array_forward(input_val):
-        deep, row, col = input_val.shape
-        ret = np.zeros((deep, row, col), dtype=float)
-        for index_deep in range(deep):
-            for i in range(row):
-                for j in range(col):
-                    ret[index_deep][i][j] = Activition.forward(input_val[index_deep][i][j])
-        return ret
-
-    @staticmethod
-    def backward(in_val):
-        return 1 if in_val > 0 else 0
-
-    @staticmethod
-    def array_backward(net_val, out_val):
-        deep, row, col = net_val.shape
-        ret = np.zeros((deep, row, col), dtype=float)
-        for index_deep in range(deep):
-            for i in range(row):
-                for j in range(col):
-                    ret[index_deep][i][j] = Activition.backward(net_val[index_deep][i][j])
-        return ret
+from activation import array_forward, SigmoidActivation, array_backward
 
 
 class ConOp(object):
@@ -150,6 +122,9 @@ class FeatureMap(object):
         self.__input_feature_map = None
         self.__output_feature_map = None
 
+        self.__w = np.random.uniform(-0.1, 0.1)
+        self.__b = np.random.uniform(-0.1, 0.1)
+
     def set_input_filter(self, input_filter):
         self.__input_filter = input_filter
 
@@ -162,11 +137,13 @@ class FeatureMap(object):
     def set_output_feature_map(self, feature_map):
         self.__output_feature_map = feature_map
 
-    def cal_out(self):
+    def cal_net_out(self):
         for i in range(len(self.__input_filter.w_list)):
             self.__net_val[i] = ConOp.convolution(self.__input_feature_map.out_val, self.__input_filter.w_list[i],
                                                   self.__step, self.__input_filter.bias[i])
-        self.__out_val = Activition.array_forward(self.__net_val)
+
+    def cal_out_val(self):
+        self.__out_val = self.__net_val
 
     def cal_err_out(self):
         cal1 = ConOp.add_zero_circle(self.__output_feature_map.err_term, self.__output_filter.w_list[0].shape[1] - 1)
@@ -181,13 +158,40 @@ class FeatureMap(object):
 
     def cal_err_term(self):
         self.cal_err_out()
-        self.__err_term = self.__err_out * Activition.array_backward(self.__net_val)
+        self.__err_term = self.__err_out
 
     def set_err_term(self, err_term):
-        self.__err_term = err_term * Activition.array_backward(self.__net_val)
+        self.__err_term = err_term
 
     def set_out_val(self, out_val):
         self.__out_val = out_val
+
+    def get_err_out_from_pooling(self):
+        next_out_val = self.__output_feature_map.out_val
+        next_err_out = self.__output_feature_map.err_out
+        deep, row, col = self.__err_out.shape
+        for index_deep in range(deep):
+            for i in range(row):
+                for j in range(col):
+                    ti = int(i / 2)
+                    tj = int(j / 2)
+                    self.__err_out[index_deep][i][j] = next_err_out[index_deep][ti][tj] * self.__w
+        self.__err_out = self.__err_out * array_backward(next_out_val, SigmoidActivation)
+
+    def cal_dw(self):
+        pass
+
+    def pooling_cal_net_val(self):
+        input_out_val = self.__input_feature_map.out_val
+        deep, row, col = self.__net_val.shape
+        for index_deep in range(deep):
+            for i in range(row):
+                for j in range(col):
+                    self.__net_val[index_deep][i][j] = np.sum(
+                        input_out_val[index_deep][i: i + 2, j: j + 2]) * self.__w + self.__b
+
+    def pooing_cal_out_val(self):
+        self.__out_val = array_forward(self.__net_val, SigmoidActivation)
 
     @property
     def net_val(self):
@@ -196,6 +200,10 @@ class FeatureMap(object):
     @property
     def out_val(self):
         return self.__out_val
+
+    @property
+    def err_out(self):
+        return self.__err_out
 
     @property
     def err_term(self):
@@ -295,5 +303,3 @@ if __name__ == '__main__':
 
                     print((err1 - err2) / (2 * e))
                     print(dw[i][index_deep][r][co])
-
-
