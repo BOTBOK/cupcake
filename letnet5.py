@@ -113,8 +113,9 @@ class FilterLayer(object):
 class FeatureMap(object):
     def __init__(self, width, deep, step):
         self.__step = step
-        self.__out_val = np.zeros((deep, width, width), dtype=float)
         self.__net_val = np.zeros((deep, width, width), dtype=float)
+        self.__net_val_without_w_b = np.zeros((deep, width, width), dtype=float)
+        self.__out_val = np.zeros((deep, width, width), dtype=float)
         self.__err_term = np.zeros((deep, width, width), dtype=float)
         self.__err_out = np.zeros((deep, width, width), dtype=float)
         self.__input_filter = None
@@ -122,8 +123,10 @@ class FeatureMap(object):
         self.__input_feature_map = None
         self.__output_feature_map = None
 
-        self.__w = np.random.uniform(-0.1, 0.1)
-        self.__b = np.random.uniform(-0.1, 0.1)
+        self.__dw = np.ones((deep, width, width), dtype=float)
+        self.__db = np.ones((deep, width, width), dtype=float)
+        self.__w = np.random.uniform(-0.1, 0.1, (deep, width, width))
+        self.__b = np.random.uniform(-0.1, 0.1, (deep, width, width))
 
     def set_input_filter(self, input_filter):
         self.__input_filter = input_filter
@@ -157,7 +160,6 @@ class FeatureMap(object):
             self.__err_out[index_deep] = ConOp.convolution(cal1, cal2, 1, 0)
 
     def cal_err_term(self):
-        self.cal_err_out()
         self.__err_term = self.__err_out
 
     def set_err_term(self, err_term):
@@ -169,17 +171,19 @@ class FeatureMap(object):
     def get_err_out_from_pooling(self):
         next_out_val = self.__output_feature_map.out_val
         next_err_out = self.__output_feature_map.err_out
-        deep, row, col = self.__err_out.shape
+        pooling_w = self.__output_feature_map.pooling_w
+        deep, row, col = next_err_out.shape
         for index_deep in range(deep):
             for i in range(row):
                 for j in range(col):
-                    ti = int(i / 2)
-                    tj = int(j / 2)
-                    self.__err_out[index_deep][i][j] = next_err_out[index_deep][ti][tj] * self.__w
-        self.__err_out = self.__err_out * array_backward(next_out_val, SigmoidActivation)
-
-    def cal_dw(self):
-        pass
+                    ti = i * 2
+                    tj = j * 2
+                    tmp_err_val = next_err_out[index_deep][i][j] * pooling_w[index_deep][i][
+                        j] * SigmoidActivation.backward(next_out_val[index_deep][i][j])
+                    self.__err_out[index_deep][ti][tj] = tmp_err_val
+                    self.__err_out[index_deep][ti + 1][tj] = tmp_err_val
+                    self.__err_out[index_deep][ti][tj + 1] = tmp_err_val
+                    self.__err_out[index_deep][ti + 1][tj + 1] = tmp_err_val
 
     def pooling_cal_net_val(self):
         input_out_val = self.__input_feature_map.out_val
@@ -187,11 +191,18 @@ class FeatureMap(object):
         for index_deep in range(deep):
             for i in range(row):
                 for j in range(col):
-                    self.__net_val[index_deep][i][j] = np.sum(
-                        input_out_val[index_deep][i: i + 2, j: j + 2]) * self.__w + self.__b
+                    oi = 2 * i
+                    oj = 2 * j
+                    self.__net_val_without_w_b[index_deep][i][j] = np.sum(
+                        input_out_val[index_deep][oi: oi + 2, oj: oj + 2])
+                    self.__net_val[index_deep][i][j] = self.__net_val_without_w_b[index_deep][i][j] * \
+                                                       self.__w[index_deep][i][j] + self.__b[index_deep][i][j]
 
-    def pooing_cal_out_val(self):
+    def pooling_cal_out_val(self):
         self.__out_val = array_forward(self.__net_val, SigmoidActivation)
+
+    def cal_dw(self):
+        pass
 
     @property
     def net_val(self):
@@ -209,6 +220,10 @@ class FeatureMap(object):
     def err_term(self):
         return self.__err_term
 
+    @property
+    def pooling_w(self):
+        return self.__w
+
 
 def judge_awl(in1, in2):
     deep, row, col = in1.shape
@@ -224,45 +239,63 @@ def judge_awl(in1, in2):
     return False
 
 
-if __name__ == '__main__':
-    a = FeatureMap(5, 1, 1)
-    w1 = FilterLayer(2, 1, 1, 1)
-    b = FeatureMap(4, 1, 1)
-    w2 = FilterLayer(2, 1, 1, 1)
-    c = FeatureMap(3, 1, 1)
-
+def connection_map(a, b, w=None):
     a.set_output_feature_map(b)
-    a.set_output_filter(w1)
+    if w is not None:
+        a.set_output_filter(w)
+        w.set_input_feature_map(a)
+
+        w.set_output_feature_map(b)
+        b.set_input_filter(w)
 
     b.set_input_feature_map(a)
-    b.set_output_feature_map(c)
-    b.set_input_filter(w1)
-    b.set_output_filter(w2)
 
-    w1.set_input_feature_map(a)
-    w1.set_output_feature_map(b)
 
-    c.set_input_feature_map(b)
-    c.set_input_filter(w2)
-    w2.set_input_feature_map(b)
-    w2.set_output_feature_map(c)
+def test():
+    a = FeatureMap(32, 1, 1)
+    w1 = FilterLayer(5, 1, 6, 1)
+    b = FeatureMap(28, 6, 1)
+    c = FeatureMap(14, 6, 1)
+    w2 = FilterLayer(5, 6, 16, 1)
+    d = FeatureMap(10, 16, 1)
+    e = FeatureMap(5, 16, 1)
+    w3 = FilterLayer(5, 16, 120, 1)
+    f = FeatureMap(1, 120, 1)
+
+    connection_map(a, b, w1)
+    connection_map(b, c)
+    connection_map(c, d, w2)
+    connection_map(d, e)
+    connection_map(e, f, w3)
 
     in_val = []
-    for i in range(1 * 5 * 5):
+    for i in range(1 * 32 * 32):
         in_val.append(i)
 
-    in_val = np.array(in_val).reshape((1, 5, 5))
+    in_val = np.array(in_val).reshape((1, 32, 32))
 
-    out_val = np.ones((1, 3, 3), dtype=float)
+    out_val = np.ones((120, 1, 1), dtype=float)
 
     a.set_out_val(in_val)
-    b.cal_out()
-    c.cal_out()
+    b.cal_net_out()
+    b.cal_out_val()
+    c.pooling_cal_net_val()
+    c.pooling_cal_out_val()
+    d.cal_net_out()
+    d.cal_out_val()
+    e.pooling_cal_net_val()
+    e.pooling_cal_out_val()
+    f.cal_net_out()
+    f.cal_out_val()
 
-    out_val = out_val * Activition.array_backward(out_val)
-
-    c.set_err_term(out_val)
-    b.cal_err_term()
+    f.set_err_term(out_val)
+    e.cal_err_out()
+    e.cal_err_term()
+    d.get_err_out_from_pooling()
+    c.cal_err_out()
+    c.cal_err_term()
+    b.get_err_out_from_pooling()
+    a.cal_err_out()
     a.cal_err_term()
 
     w1.cal_dw()
@@ -277,29 +310,132 @@ if __name__ == '__main__':
         for index_deep in range(deep):
             for r in range(row):
                 for co in range(col):
-                    e = 0.00001
-                    w_list[i][index_deep][r][co] += e
+                    es = 0.00001
+                    w_list[i][index_deep][r][co] += es
                     w1.set_w(w_list)
-                    b.cal_out()
-                    c.cal_out()
-                    oo1 = copy.copy(b.net_val)
-                    o1 = copy.copy(c.net_val)
-                    err1 = err_term(c.out_val)
+                    b.cal_net_out()
+                    b.cal_out_val()
+                    c.pooling_cal_net_val()
+                    c.pooling_cal_out_val()
+                    d.cal_net_out()
+                    d.cal_out_val()
+                    e.pooling_cal_net_val()
+                    e.pooling_cal_out_val()
+                    f.cal_net_out()
+                    f.cal_out_val()
+                    err1 = err_term(f.out_val)
 
-                    w_list[i][index_deep][r][co] -= 2 * e
+                    w_list[i][index_deep][r][co] -= 2 * es
+                    b.cal_net_out()
+                    b.cal_out_val()
+                    c.pooling_cal_net_val()
+                    c.pooling_cal_out_val()
+                    d.cal_net_out()
+                    d.cal_out_val()
+                    e.pooling_cal_net_val()
+                    e.pooling_cal_out_val()
+                    f.cal_net_out()
+                    f.cal_out_val()
+                    err2 = err_term(f.out_val)
+
+                    w_list[i][index_deep][r][co] += es
                     w1.set_w(w_list)
-                    b.cal_out()
-                    c.cal_out()
-                    oo2 = copy.copy(b.net_val)
-                    o2 = copy.copy(c.net_val)
-                    err2 = err_term(c.out_val)
-                    if judge_awl(oo1, oo2):
-                        print("b分布在函数不同分段")
-                    if judge_awl(o1, o2):
-                        print("c分布在不同两段")
 
-                    w_list[i][index_deep][r][co] += e
+                    print((err1 - err2) / (2 * es))
+                    print(dw[i][index_deep][r][co])
+
+
+if __name__ == '__main__':
+    a = FeatureMap(32, 1, 1)
+    w1 = FilterLayer(5, 1, 6, 1)
+    b = FeatureMap(28, 6, 1)
+    c = FeatureMap(14, 6, 1)
+    w2 = FilterLayer(5, 6, 16, 1)
+    d = FeatureMap(10, 16, 1)
+    e = FeatureMap(5, 16, 1)
+    w3 = FilterLayer(5, 16, 120, 1)
+    f = FeatureMap(1, 120, 1)
+
+    connection_map(a, b, w1)
+    connection_map(b, c)
+    connection_map(c, d, w2)
+    connection_map(d, e)
+    connection_map(e, f, w3)
+
+    in_val = []
+    for i in range(1 * 32 * 32):
+        in_val.append(i)
+
+    in_val = np.array(in_val).reshape((1, 32, 32))
+
+    out_val = np.ones((120, 1, 1), dtype=float)
+
+    a.set_out_val(in_val)
+    b.cal_net_out()
+    b.cal_out_val()
+    c.pooling_cal_net_val()
+    c.pooling_cal_out_val()
+    d.cal_net_out()
+    d.cal_out_val()
+    e.pooling_cal_net_val()
+    e.pooling_cal_out_val()
+    f.cal_net_out()
+    f.cal_out_val()
+
+    f.set_err_term(out_val)
+    e.cal_err_out()
+    e.cal_err_term()
+    d.get_err_out_from_pooling()
+    d.cal_err_term()
+    c.cal_err_out()
+    c.cal_err_term()
+    b.get_err_out_from_pooling()
+    b.cal_err_term()
+    a.cal_err_out()
+    a.cal_err_term()
+
+    w1.cal_dw()
+    w2.cal_dw()
+
+    err_term = lambda a: np.sum(a)
+
+    w_list = w1.w_list
+    dw = w1.dw
+    for i in range(len(w_list)):
+        deep, row, col = w_list[i].shape
+        for index_deep in range(deep):
+            for r in range(row):
+                for co in range(col):
+                    es = 0.00001
+                    w_list[i][index_deep][r][co] += es
+                    w1.set_w(w_list)
+                    b.cal_net_out()
+                    b.cal_out_val()
+                    c.pooling_cal_net_val()
+                    c.pooling_cal_out_val()
+                    d.cal_net_out()
+                    d.cal_out_val()
+                    e.pooling_cal_net_val()
+                    e.pooling_cal_out_val()
+                    f.cal_net_out()
+                    f.cal_out_val()
+                    err1 = err_term(f.out_val)
+
+                    w_list[i][index_deep][r][co] -= 2 * es
+                    b.cal_net_out()
+                    b.cal_out_val()
+                    c.pooling_cal_net_val()
+                    c.pooling_cal_out_val()
+                    d.cal_net_out()
+                    d.cal_out_val()
+                    e.pooling_cal_net_val()
+                    e.pooling_cal_out_val()
+                    f.cal_net_out()
+                    f.cal_out_val()
+                    err2 = err_term(f.out_val)
+
+                    w_list[i][index_deep][r][co] += es
                     w1.set_w(w_list)
 
-                    print((err1 - err2) / (2 * e))
+                    print((err1 - err2) / (2 * es))
                     print(dw[i][index_deep][r][co])
