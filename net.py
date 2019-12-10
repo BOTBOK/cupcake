@@ -12,6 +12,7 @@ class Node(object):
     def __init__(self):
         self.__out_val = 0
         self.__err_term = 0
+        self.__err_out = 0
         self.__input_link = []
         self.__output_link = []
 
@@ -34,11 +35,15 @@ class Node(object):
             self.__out_val += link.input_node.out_val * link.w
         self.__out_val = sigmoid(self.__out_val)
 
-    def cal_err_term(self):
-        tmp_v = self.__out_val * (1 - self.__out_val)
-        self.__err_term = 0
+    def cal_err_out(self):
+        self.__err_out = 0
         for link in self.__output_link:
-            self.__err_term += link.output_node.err_term * link.w * tmp_v
+            self.__err_out += link.output_node.err_term * link.w
+
+    def cal_err_term(self):
+        self.cal_err_out()
+        self.__err_term = self.__err_out * self.__out_val * (1 - self.__out_val)
+
 
     def cal_end_err_term(self, real_val):
         self.__err_term = (self.__out_val - real_val) * self.__out_val * (1 - self.__out_val)
@@ -46,6 +51,10 @@ class Node(object):
     @property
     def err_term(self):
         return self.__err_term
+
+    @property
+    def err_out(self):
+        return self.__err_out
 
 
 class StaticNode(object):
@@ -165,13 +174,24 @@ class Net(object):
         out_val = []
         for node in self.__layer_list[-1]:
             out_val.append(node.out_val)
-        return out_val
+        return out_val[:-1]
+
+    @property
+    def err_out(self):
+        ret_out = []
+        for node in self.__layer_list[0][:-1]:
+            ret_out.append(node.err_out)
+        return ret_out
+
+    def cal_err_out(self):
+        for node in self.__layer_list[0][:-1]:
+            node.cal_err_out()
 
     def cal_err_term(self, output_list):
         for i in range(len(output_list)):
             self.__layer_list[-1][i].cal_end_err_term(output_list[i])
 
-        for layer in reversed(self.__layer_list[:-1]):
+        for layer in reversed(self.__layer_list[1:-1]):
             for node in layer:
                 node.cal_err_term()
 

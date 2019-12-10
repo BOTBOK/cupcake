@@ -1,8 +1,9 @@
 import copy
-
+import struct
 import numpy as np
 
 from activation import array_forward, SigmoidActivation, array_backward
+from net import Net
 
 
 class ConOp(object):
@@ -86,10 +87,10 @@ class FilterLayer(object):
                 self.__dw_list[i][j] = ConOp.convolution(cal1[j], cal2[i], 1, 0)
             self.__db[i] = np.sum(cal2[i])
 
-    def update_w(self):
+    def update_w(self, step):
         for i in range(len(self.__dw_list)):
-            self.__w_list[i] -= self.__dw_list[i]
-            self.__bias[i] -= self.__db[i]
+            self.__w_list[i] -= step * self.__dw_list[i]
+            self.__bias[i] -= step * self.__db[i]
 
     @property
     def dw(self):
@@ -205,6 +206,10 @@ class FeatureMap(object):
         tmp_err = self.__err_out * array_backward(self.__out_val, SigmoidActivation)
         self.__dw = tmp_err * self.__net_val_without_w_b
         self.__db = tmp_err
+
+    def update_w(self, step):
+        self.__w -= step * self.__dw
+        self.__b -= step * self.__db
 
     @property
     def net_val(self):
@@ -358,6 +363,7 @@ def test():
                     print((err1 - err2) / (2 * es))
                     print(dw[i][index_deep][r][co])
 
+
 def test2():
     a = FeatureMap(32, 1, 1)
     w1 = FilterLayer(5, 1, 6, 1)
@@ -457,5 +463,247 @@ def test2():
                 print(dw[index_deep][r][co])
 
 
+def readfile():
+    with open('/Users/shenjiafeng/ai/data/mnist/train-images.idx3-ubyte', 'rb') as f1:
+        buf1 = f1.read()
+    with open('/Users/shenjiafeng/ai/data/mnist/train-labels.idx1-ubyte', 'rb') as f2:
+        buf2 = f2.read()
+    return buf1, buf2
+
+
+def get_image(buf1):
+    image_index = 0
+    image_index += struct.calcsize('>IIII')
+    im = []
+    for i in range(10000):
+        temp = struct.unpack_from('>784B', buf1, image_index)  # '>784B'的意思就是用大端法读取784个unsigned byte
+        im.append(np.reshape(temp, 784))
+        image_index += struct.calcsize('>784B')  # 每次增加784B
+    return im
+
+
+def get_label(buf2):  # 得到标签数据
+    label_index = 0
+    label_index += struct.calcsize('>II')
+    return struct.unpack_from('>10000B', buf2, label_index)
+
+
+def cal_err(t, y):
+    ret = 0
+    for i in range(len(t)):
+        ret += (t[i] - y[i]) * (t[i] - y[i]) * 0.5
+    return ret
+
+
+def test_train1():
+    image_data, label_data = readfile()
+    im = get_image(image_data)
+    label = get_label(label_data)
+
+    a = FeatureMap(32, 1, 1)
+    w1 = FilterLayer(5, 1, 6, 1)
+    b = FeatureMap(28, 6, 1)
+    c = FeatureMap(14, 6, 1)
+    w2 = FilterLayer(5, 6, 16, 1)
+    d = FeatureMap(10, 16, 1)
+    e = FeatureMap(5, 16, 1)
+    w3 = FilterLayer(5, 16, 120, 1)
+    f = FeatureMap(1, 120, 1)
+
+    connection_map(a, b, w1)
+    connection_map(b, c)
+    connection_map(c, d, w2)
+    connection_map(d, e)
+    connection_map(e, f, w3)
+
+    net = Net(120, [84], 10)
+
+    for i in range(1000):
+        a.set_out_val(ConOp.add_zero_circle(im[i].reshape((1, 28, 28)), 2))
+        label_v = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        label_v[label[i]] = 1
+
+        b.cal_net_out()
+        b.cal_out_val()
+        c.pooling_cal_net_val()
+        c.pooling_cal_out_val()
+        d.cal_net_out()
+        d.cal_out_val()
+        e.pooling_cal_net_val()
+        e.pooling_cal_out_val()
+        f.cal_net_out()
+        f.cal_out_val()
+
+        con_out = f.out_val
+        net_input = con_out.reshape(120)
+        net.cal_out(net_input)
+
+        net.cal_err_term(label_v)
+        net.cal_err_out()
+
+        err_out_val = np.array(net.err_out).reshape((120, 1, 1))
+        f.set_err_term(err_out_val)
+        e.cal_err_out()
+        e.cal_err_term()
+        d.get_err_out_from_pooling()
+        d.cal_err_term()
+        c.cal_err_out()
+        c.cal_err_term()
+        b.get_err_out_from_pooling()
+        b.cal_err_term()
+
+        w1.cal_dw()
+
+        w_list = w1.w_list
+        dw = w1.dw
+        for i in range(len(w_list)):
+            deep, row, col = w_list[i].shape
+            for index_deep in range(deep):
+                for r in range(row):
+                    for co in range(col):
+                        es = 0.00001
+                        w_list[i][index_deep][r][co] += es
+                        w1.set_w(w_list)
+
+                        b.cal_net_out()
+                        b.cal_out_val()
+                        c.pooling_cal_net_val()
+                        c.pooling_cal_out_val()
+                        d.cal_net_out()
+                        d.cal_out_val()
+                        e.pooling_cal_net_val()
+                        e.pooling_cal_out_val()
+                        f.cal_net_out()
+                        f.cal_out_val()
+
+                        con_out = f.out_val
+                        net_input = con_out.reshape(120)
+                        out1 = net.cal_out(net_input)
+                        err1 = cal_err(out1, label_v)
+
+                        w_list[i][index_deep][r][co] -= 2 * es
+                        w1.set_w(w_list)
+
+                        b.cal_net_out()
+                        b.cal_out_val()
+                        c.pooling_cal_net_val()
+                        c.pooling_cal_out_val()
+                        d.cal_net_out()
+                        d.cal_out_val()
+                        e.pooling_cal_net_val()
+                        e.pooling_cal_out_val()
+                        f.cal_net_out()
+                        f.cal_out_val()
+
+                        con_out = f.out_val
+                        net_input = con_out.reshape(120)
+                        out2 = net.cal_out(net_input)
+                        err2 = cal_err(out2, label_v)
+
+                        w_list[i][index_deep][r][co] += es
+                        w1.set_w(w_list)
+
+                        print((err1 - err2) / (2 * es))
+                        print(dw[i][index_deep][r][co])
+
+    for i in range(10):
+        label_v = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        label_v[label[i]] = 1
+        print(label[i])
+        print(net.cal_out(im[i]))
+
+
+def test_train():
+    image_data, label_data = readfile()
+    im = get_image(image_data)
+    label = get_label(label_data)
+
+    a = FeatureMap(32, 1, 1)
+    w1 = FilterLayer(5, 1, 6, 1)
+    b = FeatureMap(28, 6, 1)
+    c = FeatureMap(14, 6, 1)
+    w2 = FilterLayer(5, 6, 16, 1)
+    d = FeatureMap(10, 16, 1)
+    e = FeatureMap(5, 16, 1)
+    w3 = FilterLayer(5, 16, 120, 1)
+    f = FeatureMap(1, 120, 1)
+
+    connection_map(a, b, w1)
+    connection_map(b, c)
+    connection_map(c, d, w2)
+    connection_map(d, e)
+    connection_map(e, f, w3)
+
+    net = Net(120, [84], 10)
+
+    for i in range(10):
+        print(i)
+
+        a.set_out_val(ConOp.add_zero_circle(im[i].reshape((1, 28, 28)), 2))
+        label_v = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        label_v[label[i]] = 1
+
+        b.cal_net_out()
+        b.cal_out_val()
+        c.pooling_cal_net_val()
+        c.pooling_cal_out_val()
+        d.cal_net_out()
+        d.cal_out_val()
+        e.pooling_cal_net_val()
+        e.pooling_cal_out_val()
+        f.cal_net_out()
+        f.cal_out_val()
+
+        con_out = f.out_val
+        net_input = con_out.reshape(120)
+        net.cal_out(net_input)
+
+        net.cal_err_term(label_v)
+        net.cal_err_out()
+
+        err_out_val = np.array(net.err_out).reshape((120, 1, 1))
+        f.set_err_term(err_out_val)
+        e.cal_err_out()
+        e.cal_err_term()
+        d.get_err_out_from_pooling()
+        d.cal_err_term()
+        c.cal_err_out()
+        c.cal_err_term()
+        b.get_err_out_from_pooling()
+        b.cal_err_term()
+
+        w1.cal_dw()
+        w2.cal_dw()
+        e.cal_dw()
+        c.cal_dw()
+        net.cal_dw()
+
+        w1.update_w(0.01)
+        w2.update_w(0.01)
+        e.update_w(0.01)
+        c.update_w(0.01)
+        net.update_w(0.01)
+
+    for i in range(10):
+        a.set_out_val(ConOp.add_zero_circle(im[i].reshape((1, 28, 28)), 2))
+        label_v = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        label_v[label[i]] = 1
+
+        b.cal_net_out()
+        b.cal_out_val()
+        c.pooling_cal_net_val()
+        c.pooling_cal_out_val()
+        d.cal_net_out()
+        d.cal_out_val()
+        e.pooling_cal_net_val()
+        e.pooling_cal_out_val()
+        f.cal_net_out()
+        f.cal_out_val()
+
+        con_out = f.out_val
+        net_input = con_out.reshape(120)
+        print(net.cal_out(net_input))
+
+
 if __name__ == '__main__':
-    test()
+    test_train()
