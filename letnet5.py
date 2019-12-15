@@ -51,6 +51,14 @@ class ConOp(object):
         return ret_val
 
 
+def copy2arr(arr):
+    deep, row, col = arr.shape
+    ret = np.zeros((deep * 2, row, col), dtype=float)
+    ret[0: deep] = arr
+    ret[deep: deep * 2] = copy.copy(arr)
+    return ret
+
+
 class FilterLayer(object):
     def __init__(self, width, input_deep, output_deep, step):
         self.__w_list = []
@@ -110,6 +118,46 @@ class FilterLayer(object):
     def bias(self):
         return self.__bias
 
+    def cal_3_6_dw(self):
+        out_err_term = self.__output_feature_map.err_term[0: 6]
+        out_err_term = ConOp.add_row_col_by_step(out_err_term, self.__step)
+        input_val = copy2arr(self.__input_feature_map.out_val)
+
+        deep, row, col = self.__w_list[0].shape
+        for i in range(len(self.__w_list)):
+            for j in range(deep):
+                self.__dw_list[i][j] = ConOp.convolution(input_val[j + i], out_err_term[i], 1, 0)
+
+    def cal_4_6_dw(self):
+        out_err_term = self.__output_feature_map.err_term[6: 12]
+        out_err_term = ConOp.add_row_col_by_step(out_err_term, self.__step)
+        input_val = copy2arr(self.__input_feature_map.out_val)
+
+        deep, row, col = self.__w_list[0].shape
+        for i in range(len(self.__w_list)):
+            for j in range(deep):
+                self.__dw_list[i][j] = ConOp.convolution(input_val[j + i], out_err_term[i], 1, 0)
+
+    def cal_2_2_dw(self):
+        out_err_term = self.__output_feature_map.err_term[12: 15]
+        out_err_term = ConOp.add_row_col_by_step(out_err_term, self.__step)
+        input_val = copy2arr(self.__input_feature_map.out_val)
+
+        for i in range(len(self.__w_list)):
+            self.__dw_list[i][0] = ConOp.convolution(input_val[0 + i], out_err_term[i], 1, 0)
+            self.__dw_list[i][1] = ConOp.convolution(input_val[1 + i], out_err_term[i], 1, 0)
+            self.__dw_list[i][2] = ConOp.convolution(input_val[3 + i], out_err_term[i], 1, 0)
+            self.__dw_list[i][3] = ConOp.convolution(input_val[4 + i], out_err_term[i], 1, 0)
+
+    def cal_1_1_dw(self):
+        out_err_term = self.__output_feature_map.err_term[15]
+        out_err_term = ConOp.add_row_col_by_step(out_err_term, self.__step)
+        input_val = self.__input_feature_map.out_val
+
+        deep, row, col = self.__w_list[0].shape
+        for i in range(deep):
+            self.__dw_list[0][i] = ConOp.convolution(input_val[i], out_err_term, 1, 0)
+
 
 class FeatureMap(object):
     def __init__(self, width, deep, step):
@@ -162,6 +210,9 @@ class FeatureMap(object):
 
     def cal_err_term(self):
         self.__err_term = self.__err_out
+
+    def set_err_out(self, err_out):
+        self.__err_out = err_out
 
     def set_err_term(self, err_term):
         self.__err_term = err_term
@@ -235,8 +286,200 @@ class FeatureMap(object):
     def dw(self):
         return self.__dw
 
+    @property
+    def input_feature_map(self):
+        return self.__input_feature_map
+
+    @property
+    def input_filter(self):
+        return self.__input_filter
+
     def set_pooling_w(self, w):
         self.__w = w
+
+
+class C3FeatureMap(FeatureMap):
+    def __init__(self, width, deep, step):
+        super().__init__(width, deep, step)
+        self.__step = step
+        self.__input_filter_3_6 = None
+        self.__input_filter_4_6 = None
+        self.__input_filter_2_2_3 = None
+        self.__input_filter_1_1_1 = None
+
+        self.__tmp_out_val = np.zeros((deep, width, width), dtype=float)
+
+        self.__input_err_term = np.zeros((6, 14, 14), dtype=float)
+
+    @property
+    def input_err_term(self):
+        return copy.copy(self.__input_err_term)
+
+    def set_3_6_filter(self, filter_3_6):
+        self.__input_filter_3_6 = filter_3_6
+
+    def set_4_6_filter(self, filter_4_6):
+        self.__input_filter_4_6 = filter_4_6
+
+    def set_4_3_filter(self, filter_4_3):
+        self.__input_filter_2_2_3 = filter_4_3
+
+    def set_1_1_filter(self, filter_1_1):
+        self.__input_filter_1_1_1 = filter_1_1
+
+    def cal_3_6_out_val(self):
+        input_feature_map = copy2arr(self.input_feature_map.out_val)
+
+        w_list = self.__input_filter_3_6.w_list
+        bias = self.__input_filter_3_6.bias
+        for i in range(len(w_list)):
+            self.__tmp_out_val[i] = ConOp.convolution(input_feature_map[i: i + 3], w_list[i], 1, bias[i])
+
+    def cal_4_6_out_val(self):
+        input_feature_map = self.input_feature_map.out_val
+        w_list = self.__input_filter_4_6.w_list
+        bias = self.__input_filter_4_6.bias
+
+        for i in range(len(w_list)):
+            self.__tmp_out_val[i + 6] = ConOp.convolution(input_feature_map[i: i + 4], w_list[i], 1, bias[i])
+
+    def cal_2_2_3_out_val(self):
+        input_feature_map = self.input_feature_map.out_val
+        deep, row, col = input_feature_map.shape
+        w_list = self.__input_filter_4_6.w_list
+        bias = self.__input_filter_4_6.bias
+
+        tmp_map = np.zeros((4, row, col), dtype=float)
+        tmp_map[0] = input_feature_map[0]
+        tmp_map[1] = input_feature_map[1]
+        tmp_map[2] = input_feature_map[3]
+        tmp_map[3] = input_feature_map[4]
+        self.__tmp_out_val[12] = ConOp.convolution(tmp_map, w_list[3], 1, bias[3])
+
+        tmp_map = np.zeros((4, row, col), dtype=float)
+        tmp_map[0] = input_feature_map[1]
+        tmp_map[1] = input_feature_map[2]
+        tmp_map[2] = input_feature_map[4]
+        tmp_map[3] = input_feature_map[5]
+        self.__tmp_out_val[13] = ConOp.convolution(tmp_map, w_list[4], 1, bias[4])
+
+        tmp_map = np.zeros((4, row, col), dtype=float)
+        tmp_map[0] = input_feature_map[2]
+        tmp_map[1] = input_feature_map[3]
+        tmp_map[2] = input_feature_map[5]
+        tmp_map[3] = input_feature_map[0]
+        self.__tmp_out_val[14] = ConOp.convolution(tmp_map, w_list[5], 1, bias[5])
+
+    def cal_1_1_1_out_val(self):
+        input_feature_map = self.input_feature_map.out_val
+        w_list = self.__input_filter_1_1_1.w_list
+        bias = self.__input_filter_1_1_1.bias
+
+        self.__tmp_out_val[15] = ConOp.convolution(input_feature_map, w_list[0], 1, bias[0])
+
+    def cal_out_val(self):
+        self.cal_4_6_out_val()
+        self.cal_3_6_out_val()
+        self.cal_2_2_3_out_val()
+        self.cal_1_1_1_out_val()
+
+        self.set_out_val(self.__tmp_out_val)
+
+    def __cal_inner_3_6_err_term(self, tmp_cal1, w_list, a, b, c):
+        cal1 = np.zeros((3, 18, 18), dtype=float)
+        cal2 = np.zeros((3, 5, 5), dtype=float)
+
+        cal1[0] = tmp_cal1[a]
+        cal2[0] = w_list[a][0]
+        cal1[1] = tmp_cal1[b]
+        cal2[1] = w_list[b][1]
+        cal1[2] = tmp_cal1[c]
+        cal2[2] = w_list[c][2]
+
+        return ConOp.convolution(cal1, ConOp.rot90(cal2, 2), 1, 0)
+
+    def cal_3_6_err_term(self, tmp_cal):
+        w_list = self.__input_filter_3_6.w_list
+
+        self.__input_err_term[0] += self.__cal_inner_3_6_err_term(tmp_cal, w_list, 0, 5, 4)
+        self.__input_err_term[1] += self.__cal_inner_3_6_err_term(tmp_cal, w_list, 1, 0, 5)
+        self.__input_err_term[2] += self.__cal_inner_3_6_err_term(tmp_cal, w_list, 2, 1, 0)
+        self.__input_err_term[3] += self.__cal_inner_3_6_err_term(tmp_cal, w_list, 3, 2, 1)
+        self.__input_err_term[4] += self.__cal_inner_3_6_err_term(tmp_cal, w_list, 4, 3, 2)
+        self.__input_err_term[5] += self.__cal_inner_3_6_err_term(tmp_cal, w_list, 5, 4, 3)
+
+    def __cal_inner_4_6_err_term(self, tmp_cal1, w_list, a, b, c, d):
+        cal1 = np.zeros((4, 18, 18), dtype=float)
+        cal2 = np.zeros((4, 5, 5), dtype=float)
+
+        cal1[0] = tmp_cal1[a + 6]
+        cal2[0] = w_list[a][0]
+        cal1[1] = tmp_cal1[b + 6]
+        cal2[1] = w_list[b][1]
+        cal1[2] = tmp_cal1[c + 6]
+        cal2[2] = w_list[c][2]
+        cal1[3] = tmp_cal1[d + 6]
+        cal2[3] = w_list[d][3]
+        return ConOp.convolution(cal1, ConOp.rot90(cal2, 2), 1, 0)
+
+    def cal_4_6_err_term(self, tmp_cal):
+        w_list = self.__input_filter_4_6.w_list
+
+        self.__input_err_term[0] += self.__cal_inner_4_6_err_term(tmp_cal, w_list, 0, 5, 4, 3)
+        self.__input_err_term[1] += self.__cal_inner_4_6_err_term(tmp_cal, w_list, 1, 0, 5, 4)
+        self.__input_err_term[2] += self.__cal_inner_4_6_err_term(tmp_cal, w_list, 2, 1, 0, 5)
+        self.__input_err_term[3] += self.__cal_inner_4_6_err_term(tmp_cal, w_list, 3, 2, 1, 0)
+        self.__input_err_term[4] += self.__cal_inner_4_6_err_term(tmp_cal, w_list, 4, 3, 2, 1)
+        self.__input_err_term[5] += self.__cal_inner_4_6_err_term(tmp_cal, w_list, 5, 4, 3, 2)
+
+    def __cal_inner_2_2_3_err_term(self, tmp_cal1, w_list, a, b, c, d):
+        cal1 = np.zeros((2, 18, 18), dtype=float)
+        cal2 = np.zeros((2, 5, 5), dtype=float)
+        index = 0
+        if a is not None:
+            cal1[index] = tmp_cal1[a + 12]
+            cal2[index] = w_list[a][0]
+            index += 1
+        if b is not None:
+            cal1[index] = tmp_cal1[b + 12]
+            cal2[index] = w_list[b][1]
+            index += 1
+        if c is not None:
+            cal1[index] = tmp_cal1[c + 12]
+            cal2[index] = w_list[c][2]
+            index += 1
+        if d is not None:
+            cal1[index] = tmp_cal1[d + 12]
+            cal2[index] = w_list[d][3]
+            index += 1
+        return ConOp.convolution(cal1, ConOp.rot90(cal2, 2), 1, 0)
+
+    def cal_2_2_3_err_term(self, tmp_cal):
+        w_list = self.__input_filter_2_2_3.w_list
+
+        self.__input_err_term[0] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, 0,    None, 2,    None)
+        self.__input_err_term[1] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, 1,    0,    None, None)
+        self.__input_err_term[2] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, 2,    1,    None, None)
+        self.__input_err_term[3] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, 2,    None, 0,    None)
+        self.__input_err_term[4] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, None, None, 1,    0)
+        self.__input_err_term[5] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, None, None, 2,    1)
+
+    def cal_1_1_1_err_term(self, tmp_cal):
+
+        w_list = ConOp.rot90(self.__input_filter_1_1_1.w_list[0], 2)
+
+        for i in range(len(self.__input_err_term)):
+            self.__input_err_term[i] += ConOp.convolution(tmp_cal[15], w_list[i], 1, 0)
+
+    def cal_input_err_term(self):
+        tmp_cal = ConOp.add_zero_circle(self.err_term, self.__input_filter_3_6.w_list[0].shape[1] - 1)
+        tmp_cal = ConOp.add_row_col_by_step(tmp_cal, self.__step)
+
+        self.__input_err_term = np.zeros((6, 14, 14), dtype=float)
+        self.cal_3_6_err_term(tmp_cal)
+        self.cal_4_6_err_term(tmp_cal)
+        self.cal_2_2_3_err_term(tmp_cal)
+        self.cal_1_1_1_err_term(tmp_cal)
 
 
 def judge_awl(in1, in2):
@@ -261,7 +504,6 @@ def connection_map(a, b, w=None):
 
         w.set_output_feature_map(b)
         b.set_input_filter(w)
-
     b.set_input_feature_map(a)
 
 
@@ -706,4 +948,8 @@ def test_train():
 
 
 if __name__ == '__main__':
-    test_train()
+    ta = []
+    for i in range(6 * 10 * 10):
+        ta.append(i)
+    a = np.array(ta).reshape(6, 10, 10)
+    print(a[0:3])
