@@ -3,6 +3,7 @@ import numpy as np
 import letnet5 as n5
 import data_mnist as mnist_data
 
+
 class LetNet5(object):
     def __init__(self):
         self.c1_map = n5.FeatureMap(32, 1, 1)
@@ -109,8 +110,7 @@ class LetNet5(object):
         self.s2_out_c3_in_map.update_w(learn_rate)
         self.s4_out_c5_in_map.update_w(learn_rate)
 
-
-if __name__ == '__main__':
+def test():
     image_data, label_data = mnist_data.readfile()
     im = mnist_data.get_image(image_data)
     label = mnist_data.get_label(label_data)
@@ -158,3 +158,53 @@ if __name__ == '__main__':
 
                         print((err1 - err2) / (2 * es))
                         print(dw[i][index_deep][r][co])
+
+
+if __name__ == '__main__':
+    image_data, label_data = mnist_data.readfile()
+    im = mnist_data.get_image(image_data)
+    label = mnist_data.get_label(label_data)
+
+    let_net_5 = LetNet5()
+
+    for i in range(10):
+        print(i)
+
+        input_val = n5.ConOp.add_zero_circle(im[i].reshape((1, 28, 28)), 2)
+
+        label_v = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+        out_err = np.ones((120, 1, 1), dtype=float)
+
+        label_v[label[i]] = 1
+        let_net_5.cal_out(input_val)
+        let_net_5.cal_err_term(out_err)
+        let_net_5.cale_dw()
+
+        err_term = lambda a: np.sum(a)
+
+        w_list = let_net_5.c3_out_s4_in_map.pooling_w
+        dw = let_net_5.c3_out_s4_in_map.dw
+
+        deep, row, col = w_list.shape
+        for index_deep in range(deep):
+            for r in range(row):
+                for co in range(col):
+                    es = 0.00001
+                    w_list[index_deep][r][co] += es
+                    let_net_5.c3_out_s4_in_map.set_pooling_w(w_list)
+
+                    let_net_5.cal_out(input_val)
+                    err1 = err_term(let_net_5.out_val)
+
+                    w_list[index_deep][r][co] -= 2 * es
+                    let_net_5.c3_out_s4_in_map.set_pooling_w(w_list)
+
+                    let_net_5.cal_out(input_val)
+                    err2 = err_term(let_net_5.out_val)
+
+                    w_list[index_deep][r][co] += es
+                    let_net_5.c3_out_s4_in_map.set_pooling_w(w_list)
+
+                    print((err1 - err2) / (2 * es))
+                    print(dw[index_deep][r][co])

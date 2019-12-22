@@ -336,7 +336,7 @@ class C3FeatureMap(FeatureMap):
             self.__tmp_out_val[i] = ConOp.convolution(input_feature_map[i: i + 3], w_list[i], 1, bias[i])
 
     def cal_4_6_out_val(self):
-        input_feature_map = self.input_feature_map.out_val
+        input_feature_map = copy2arr(self.input_feature_map.out_val)
         w_list = self.__input_filter_4_6.w_list
         bias = self.__input_filter_4_6.bias
 
@@ -346,29 +346,29 @@ class C3FeatureMap(FeatureMap):
     def cal_2_2_3_out_val(self):
         input_feature_map = self.input_feature_map.out_val
         deep, row, col = input_feature_map.shape
-        w_list = self.__input_filter_4_6.w_list
-        bias = self.__input_filter_4_6.bias
+        w_list = self.__input_filter_2_2_3.w_list
+        bias = self.__input_filter_2_2_3.bias
 
         tmp_map = np.zeros((4, row, col), dtype=float)
         tmp_map[0] = input_feature_map[0]
         tmp_map[1] = input_feature_map[1]
         tmp_map[2] = input_feature_map[3]
         tmp_map[3] = input_feature_map[4]
-        self.__tmp_out_val[12] = ConOp.convolution(tmp_map, w_list[3], 1, bias[3])
+        self.__tmp_out_val[12] = ConOp.convolution(tmp_map, w_list[0], 1, bias[0])
 
         tmp_map = np.zeros((4, row, col), dtype=float)
         tmp_map[0] = input_feature_map[1]
         tmp_map[1] = input_feature_map[2]
         tmp_map[2] = input_feature_map[4]
         tmp_map[3] = input_feature_map[5]
-        self.__tmp_out_val[13] = ConOp.convolution(tmp_map, w_list[4], 1, bias[4])
+        self.__tmp_out_val[13] = ConOp.convolution(tmp_map, w_list[1], 1, bias[1])
 
         tmp_map = np.zeros((4, row, col), dtype=float)
         tmp_map[0] = input_feature_map[2]
         tmp_map[1] = input_feature_map[3]
         tmp_map[2] = input_feature_map[5]
         tmp_map[3] = input_feature_map[0]
-        self.__tmp_out_val[14] = ConOp.convolution(tmp_map, w_list[5], 1, bias[5])
+        self.__tmp_out_val[14] = ConOp.convolution(tmp_map, w_list[2], 1, bias[2])
 
     def cal_1_1_1_out_val(self):
         input_feature_map = self.input_feature_map.out_val
@@ -457,10 +457,10 @@ class C3FeatureMap(FeatureMap):
     def cal_2_2_3_err_term(self, tmp_cal):
         w_list = self.__input_filter_2_2_3.w_list
 
-        self.__input_err_term[0] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, 0,    None, 2,    None)
+        self.__input_err_term[0] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, 0,    None, None, 2)
         self.__input_err_term[1] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, 1,    0,    None, None)
         self.__input_err_term[2] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, 2,    1,    None, None)
-        self.__input_err_term[3] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, 2,    None, 0,    None)
+        self.__input_err_term[3] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, None, 2,    0,    None)
         self.__input_err_term[4] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, None, None, 1,    0)
         self.__input_err_term[5] += self.__cal_inner_2_2_3_err_term(tmp_cal, w_list, None, None, 2,    1)
 
@@ -948,8 +948,4 @@ def test_train():
 
 
 if __name__ == '__main__':
-    ta = []
-    for i in range(6 * 10 * 10):
-        ta.append(i)
-    a = np.array(ta).reshape(6, 10, 10)
-    print(a[0:3])
+    test2()
