@@ -110,6 +110,7 @@ class LetNet5(object):
         self.s2_out_c3_in_map.update_w(learn_rate)
         self.s4_out_c5_in_map.update_w(learn_rate)
 
+
 def test():
     image_data, label_data = mnist_data.readfile()
     im = mnist_data.get_image(image_data)
@@ -183,8 +184,8 @@ if __name__ == '__main__':
 
         err_term = lambda a: np.sum(a)
 
-        w_list = let_net_5.c3_out_s4_in_map.pooling_w
-        dw = let_net_5.c3_out_s4_in_map.dw
+        w_list = let_net_5.s2_out_c3_in_map.pooling_w
+        dw = let_net_5.s2_out_c3_in_map.dw
 
         deep, row, col = w_list.shape
         for index_deep in range(deep):
@@ -192,19 +193,19 @@ if __name__ == '__main__':
                 for co in range(col):
                     es = 0.00001
                     w_list[index_deep][r][co] += es
-                    let_net_5.c3_out_s4_in_map.set_pooling_w(w_list)
+                    let_net_5.s2_out_c3_in_map.set_pooling_w(w_list)
 
                     let_net_5.cal_out(input_val)
                     err1 = err_term(let_net_5.out_val)
 
                     w_list[index_deep][r][co] -= 2 * es
-                    let_net_5.c3_out_s4_in_map.set_pooling_w(w_list)
+                    let_net_5.s2_out_c3_in_map.set_pooling_w(w_list)
 
                     let_net_5.cal_out(input_val)
                     err2 = err_term(let_net_5.out_val)
 
                     w_list[index_deep][r][co] += es
-                    let_net_5.c3_out_s4_in_map.set_pooling_w(w_list)
+                    let_net_5.s2_out_c3_in_map.set_pooling_w(w_list)
 
                     print((err1 - err2) / (2 * es))
                     print(dw[index_deep][r][co])
