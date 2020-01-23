@@ -1,7 +1,4 @@
-# copy 卷积神经网络python实现代码
 import numpy as np
-
-from create_data import gen_toy_data, split_data
 
 
 def initialize_parameters(layer_param):
@@ -26,6 +23,8 @@ def forward(X, layer_param, weights, biases):
     hiddens = [X]
     for i in range(len(layer_param) - 2):
         hiddens.append(np.maximum(0, np.dot(hiddens[i], weights[i]) + biases[i]))
+        #hiddens.append(np.dot(hiddens[i], weights[i]) + biases[i])
+
     scores = np.dot(hiddens[-1], weights[-1]) + biases[-1]
     return hiddens, scores
 
@@ -73,11 +72,11 @@ def gradient_backprop(dscores, hiddens, weights, biases, reg):
     dweights = []
 
     dhidden = dscores
-    for i in range(len(hiddens)-1, -1, -1):
+    for i in range(len(hiddens) - 1, -1, -1):
         dbiases.append(np.sum(dhidden, axis=0, keepdims=True))
         dweights.append(np.dot(hiddens[i].T, dhidden) + reg * weights[i])
         dhidden = np.dot(dhidden, weights[i].T)
-        dhidden[dhidden <= 0] = 0
+        dhidden[hiddens[i] <= 0] = 0
     return dweights, dbiases
 
 
@@ -88,65 +87,14 @@ def gen_random_data(dim, N_class, num_samp_per_class):
     return X, labels
 
 
-def check_gradient(X, lables, layer_param, check_weight_or_bias):
-    # (X, lables) = gen_random_data(dim)
-    (weights, biases, vweights, vbiases) = initialize_parameters(layer_param)
-    reg = 10 ** (-9)
-    step = 10 ** (-5)
-    for layer in range(len(weights)):
-        if check_weight_or_bias:
-            row = np.random.randint(weights[layer].shape[0])
-            col = np.random.randint(weights[layer].shape[1])
-            param = weights[layer][row][col]
-        else:
-            row = np.random.randint(biases[layer].shape[1])
-            param = biases[layer][0][row]
+def nesterov_momentumSGD(vparams, params, dparams, lr, mu):
+    update_ratio = []
+    for i in range(len(params)):
+        pre_vparam = vparams[i]
+        vparams[i] = mu * vparams[i] - lr * dparams[-1 - i]
+        update_param = vparams[i] + mu * (vparams[i] - pre_vparam)
+        params[i] += update_param
+        # params[i] += - lr * dparams[-1 - i]
+        update_ratio.append(np.sum(np.abs(update_param)) / np.sum(np.abs(params[i])))
 
-        hiddens, scores = forward(X, layer_param, weights, biases)
-
-        dscores = decores_softmax(scores, lables)
-        dweights, dbiases = gradient_backprop(dscores, hiddens, weights, biases, reg)
-
-        if check_weight_or_bias:
-            danalytic = dweights[-1 - layer][row][col]
-        else:
-            danalytic = dbiases[-1 - layer][0][row]
-
-        if check_weight_or_bias:
-            weights[layer][row][col] = param - step
-        else:
-            biases[layer][0][row] = param - step
-
-        hiddens, scores = forward(X, layer_param, weights, biases)
-        data_loss1 = data_loss_softmax(scores, lables)
-        reg_loss1 = reg_L2_loss(weights, reg)
-        loss1 = data_loss1 + reg_loss1
-
-        if check_weight_or_bias:
-            weights[layer][row][col] = param + step
-        else:
-            biases[layer][0][row] = param + step
-
-        hiddens, scores = forward(X, layer_param, weights, biases)
-        data_loss2 = data_loss_softmax(scores, lables)
-        reg_loss2 = reg_L2_loss(weights, reg)
-        loss2 = data_loss2 + reg_loss2
-
-        dnumeric = (loss2 - loss1) / (2 * step)
-
-        print(layer, data_loss1, data_loss2)
-        error_relative = np.abs(danalytic - dnumeric) / np.maximum(danalytic, dnumeric)
-        print(danalytic, dnumeric, error_relative)
-
-
-if __name__ == '__main__':
-    num_samp_per_class = 200
-    dim = 2
-    N_class = 4
-
-    X, labels = gen_toy_data(dim, N_class, num_samp_per_class)
-    X_train, labels_train, X_val, labels_val, X_test, labels_test = split_data(X, labels)
-
-    print(X_train.shape, labels_train.shape)
-
-    check_gradient(X, labels, [2, 100, 4], True)
+    return update_ratio
